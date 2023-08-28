@@ -5,8 +5,8 @@ const fs = require('fs');
 const google = require('googlethis');
 const openai = require('openai');
 const wordcount = require('word-count');
+const { execSync } = require('child_process');
 
-const keyword = process.argv[2];
 const client = new openai.OpenAI(process.env.OPENAI_API_KEY);
 
 function pbcopy(data) {
@@ -89,7 +89,7 @@ const generateArticle = async (topic, summaries) => {
     
     Use the following contents of similar articles to construct the article. Do not repeat the same content. Use a tone that is appropriate for a blog post. The article should be SEO-optimized. The article must be more than ${minimumWordCount} words. It must be formatted as Markdown.
     
-    In the introductory paragraph, introduce the topic and the main points of the article. Also, declaratively answer any questions that the reader may have in a format that is Google SEO-friendly. Generate Markdown links as often as possible for anything that should be linked to.
+    In the introductory paragraph, introduce the topic and the main points of the article. Also, declaratively answer any questions that the reader may have in a format that is Google SEO-friendly. Generate Markdown links as often as possible for anything that should be linked to. You must generate at least one Markdown link in the first two paragraphs linking to the concept or project.
 
     You must always provide the following things in the blog post:
 
@@ -134,13 +134,25 @@ const generateArticle = async (topic, summaries) => {
   return finalContent;
 }
 
-const main = async () => {
+const readKeywords = () => {
+  const files = fs.readdirSync('./keywords');
+  return files
+}
+
+const main = async (keyword) => {
   if (!keyword) {
     logger.info('Please provide a keyword');
     return;
   }
 
+  logger.info(`Processing keyword: ${keyword}`)
+
   const results = await queryGoogle(keyword);
+
+  if (results.length === 0) {
+    logger.info('No results found. Something might be wrong with this keyword. Skipping...')
+    return;
+  }
 
   let summaries = [];
 
@@ -154,16 +166,29 @@ const main = async () => {
   const article = await generateArticle(keyword, summaries);
   logger.info(`Article generated. ${wordcount(article)} words`)
 
-  fs.writeFileSync(`./articles/${keyword}.md`, article);
-  logger.info(`Article saved to ./articles/${keyword}.md`)
-
-  pbcopy(article);
-  logger.info('Article copied to clipboard')
-
   const titles = await generateTitles(keyword);
   logger.info(`Titles generated: \n${titles}`)
+
+  const fileContent = `
+    ${titles} 
+
+    ${article}
+  `
+
+  fs.writeFileSync(`./articles/${keyword}.md`, fileContent);
+  logger.info(`Article saved to ./articles/${keyword}.md`)
+
+  logger.info(`Deleting keyword file`)
+  fs.unlinkSync(`./keywords/${keyword}`)
 
   logger.info('DONE')
 }
 
-main()
+const run = async () => {
+  const keywords = readKeywords()
+  await main(keywords[0])
+  execSync('sleep 5')
+  run()
+}
+
+run()
