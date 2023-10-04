@@ -20,7 +20,14 @@ const queryGoogle = async (keyword) => {
 }
 
 const summarizeContent = async (url) => {
-  const html = await fetch(url);
+  let html
+  try {
+    html = await fetch(url);
+  } catch (e) {
+    logger.info(`Error fetching ${url}. Skipping...`)
+    return;
+  }
+
   const text = await html.text();
 
   const $ = cheerio.load(text);
