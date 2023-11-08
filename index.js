@@ -9,11 +9,6 @@ const { execSync } = require('child_process');
 
 const client = new openai.OpenAI(process.env.OPENAI_API_KEY);
 
-function pbcopy(data) {
-  var proc = require('child_process').spawn('pbcopy');
-  proc.stdin.write(data); proc.stdin.end();
-}
-
 const queryGoogle = async (keyword) => {
   const search = await google.search(keyword);
   return search.results.slice(0, 5)
