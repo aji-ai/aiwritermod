@@ -59,7 +59,7 @@ const summarizeContent = async (url) => {
   ]
 
   const response = await client.chat.completions.create({
-    model: 'gpt-3.5-turbo-16k',
+    model: 'gpt-4-turbo',
     messages
   })
 
@@ -72,7 +72,7 @@ const generateTitles = async (keyword) => {
   `
 
   const response = await client.chat.completions.create({
-    model: 'gpt-4',
+    model: 'gpt-4-turbo',
     messages: [
       { role: 'user', content }
     ]
@@ -118,7 +118,7 @@ const generateArticle = async (topic, summaries) => {
 
   while (wordcount(finalContent) < minimumWordCount) {
     const response = await client.chat.completions.create({
-      model: 'gpt-3.5-turbo-16k',
+      model: 'gpt-4-turbo',
       messages: [
         { role: "system", content: `Act as a writer creating SEO-optimized articles for a blog. You must generate at least ${minimumWordCount - wordcount(finalContent)} more words.` },
         { role: 'user', content }
