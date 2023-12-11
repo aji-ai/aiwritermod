@@ -96,7 +96,7 @@ const summarizeContent = async (url) => {
 
 const generateTitles = async (keyword) => {
   const content = `
-    Generate 10 SEO-optimized titles for the following keyword: ${keyword}. Return them as JSON.
+    Generate 10 SEO-optimized titles for the following keyword: ${keyword}.
   `;
 
   const response = await client.chat.completions.create({
@@ -210,7 +210,7 @@ const main = async (keyword) => {
   const article = await generateArticle(keyword, summaries);
   logger.info(`Article generated. ${wordcount(article)} words`);
 
-  const titles = JSON.parse(await generateTitles(keyword));
+  const titles = await generateTitles(keyword);
   logger.info(`Titles generated: \n${titles}`);
 
   const fileContent = `
