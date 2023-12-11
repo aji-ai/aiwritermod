@@ -9,6 +9,8 @@ const { execSync } = require('child_process');
 
 const client = new openai.OpenAI(process.env.OPENAI_API_KEY);
 
+const model = process.env.OPENAI_MODEL || "gpt-4-1106-preview"
+
 const queryGoogle = async (keyword) => {
   const search = await google.search(keyword);
   return search.results.slice(0, 5)
@@ -54,7 +56,7 @@ const summarizeContent = async (url) => {
   ]
 
   const response = await client.chat.completions.create({
-    model: 'gpt-4-turbo',
+    model,
     messages
   })
 
@@ -67,7 +69,7 @@ const generateTitles = async (keyword) => {
   `
 
   const response = await client.chat.completions.create({
-    model: 'gpt-4-turbo',
+    model,
     messages: [
       { role: 'user', content }
     ]
@@ -78,7 +80,7 @@ const generateTitles = async (keyword) => {
 }
 
 const generateArticle = async (topic, summaries) => {
-  const summariesAsText = summaries.map(summary => summary.content)
+  const summariesAsText = summaries.filter(s => !!s).map(summary => summary.content)
 
   const currentToken = 0;
 
@@ -113,7 +115,7 @@ const generateArticle = async (topic, summaries) => {
 
   while (wordcount(finalContent) < minimumWordCount) {
     const response = await client.chat.completions.create({
-      model: 'gpt-4-turbo',
+      model,
       messages: [
         { role: "system", content: `Act as a writer creating SEO-optimized articles for a blog. You must generate at least ${minimumWordCount - wordcount(finalContent)} more words.` },
         { role: 'user', content }

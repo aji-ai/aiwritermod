@@ -14,7 +14,7 @@
   "dependencies": {
     "cheerio": "^1.0.0-rc.12",
     "dotenv": "^16.3.1",
-    "googlethis": "^1.7.1",
+    "googlethis": "github:timsu/google-this",
     "openai": "^4.3.0",
     "pino": "^8.15.0",
     "word-count": "^0.2.2"
