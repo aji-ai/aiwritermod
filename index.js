@@ -57,7 +57,8 @@ const main = async (keyword, skipPublish = false) => {
     ${article}
   `;
 
-  if (!skipPublish) {
+  const enableWordpress = process.env.ENABLE_WORDPRESS;
+  if (!skipPublish && enableWordpress) {
     logger.info(`Creating Wordpress draft with title: ${keyword}`);
     await createWordpressDraft(keyword, fileContent);
     logger.info(`Wordpress draft created`);

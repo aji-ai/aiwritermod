@@ -7,7 +7,7 @@ This is a Node.js application that generates articles based on a given keyword. 
 ## Getting Started
 
 1. Install the required dependencies: `npm install`
-2. Create a `.env` file and provide the necessary environment variables (e.g., API keys, credentials)
+2. Create a `.env` file and provide the necessary environment variables (e.g., API keys, credentials): `cp .env.example .env` and fill it out
 3. Add your keywords to the `./keywords` directory, one keyword per file
 4. Run the application: `node index.js`
 
@@ -20,12 +20,6 @@ The application can be run in two modes:
 2. **HTTP Server**: The application runs an HTTP server that listens for GET requests at the `/` endpoint. The keyword can be provided as a query parameter (`?keyword=<keyword>`), and the `skip_publish` query parameter can be used to skip publishing the article to WordPress.
 
 ## Example
-
-```
-node index.js "machine learning"
-```
-
-This will generate an article based on the keyword "machine learning", summarize the search results, and create a WordPress draft with the generated content.
 
 ```
 curl http://localhost:5139/?keyword=ai&skip_publish=true
