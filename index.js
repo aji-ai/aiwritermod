@@ -54,7 +54,7 @@ const main = async (keyword, options = {}) => {
       });
     } else {
       logger.info(`PROCESSING WEB "${result.title} - ${result.url}"`);
-      const summary = await summarizeContent(result.url);
+      const summary = await summarizeContent(result.url, activeModel);
       if (summary?.usage) {
         totalInputTokens += summary.usage.prompt_tokens;
         totalOutputTokens += summary.usage.completion_tokens;

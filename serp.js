@@ -31,7 +31,7 @@ const queryGoogle = async (keyword) => {
   return search.results.slice(0, 5);
 };
 
-const summarizeContent = async (url) => {
+const summarizeContent = async (url, activeModel) => {
   let html;
   try {
     html = await fetch(url);
@@ -43,13 +43,59 @@ const summarizeContent = async (url) => {
   const text = await html.text();
   const $ = cheerio.load(text);
   const body = $("h1, h2, h3, h4, h5, h6, p");
-  const activeModel = getModel();
 
   const content = `
     Helpfully summarize the following content:
 
     ${body.text().slice(0, 14000)}
   `;
+
+  // Handle Anthropic models
+  if (activeModel.startsWith('claude-')) {
+    const { anthropicClient, getAnthropicModelId } = require('./anthropic');
+    const fullModelId = getAnthropicModelId(activeModel);
+    logger.info(`Using Anthropic model: ${fullModelId} for summarization`);
+    try {
+      const response = await anthropicClient.messages.create({
+        model: fullModelId,
+        max_tokens: SUMMARY_MAX_TOKENS,
+        messages: [{
+          role: 'user',
+          content: `TASK: Create a detailed summary of the provided content.
+
+OUTPUT REQUIREMENTS:
+1. Extract key facts and events
+2. Preserve important quotes verbatim
+3. Include specific dates and numbers
+4. Maintain original context
+5. Focus on concrete details over analysis
+
+CONTENT TO SUMMARIZE:
+${content}
+
+Begin the summary now:`
+        }]
+      });
+
+      const usage = {
+        prompt_tokens: response.usage.input_tokens,
+        completion_tokens: response.usage.output_tokens,
+        total_tokens: response.usage.input_tokens + response.usage.output_tokens
+      };
+
+      const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, activeModel);
+
+      return {
+        content: response.content,
+        source: url,
+        usage,
+        cost
+      };
+    } catch (error) {
+      logger.error(`Error in Anthropic summarization:`, error);
+      return null;
+    }
+  }
 
   const messages = [];
   
@@ -152,16 +198,24 @@ const queryLocalDir = async (keyword, sourceDir) => {
 const calculateCost = (inputTokens, outputTokens, model) => {
   const rates = {
     'gpt-4o': {
-      input: 2.50 / 1000000,  // $2.50 per 1M tokens
-      output: 10.00 / 1000000 // $10.00 per 1M tokens
+      input: 2.50 / 1000000,
+      output: 10.00 / 1000000
     },
     'gpt-4o-mini': {
-      input: 0.150 / 1000000,  // $0.150 per 1M tokens
-      output: 0.600 / 1000000  // $0.600 per 1M tokens
+      input: 0.150 / 1000000,
+      output: 0.600 / 1000000
     },
     'o1-mini': {
-      input: 3.00 / 1000000,   // $3.00 per 1M tokens
-      output: 12.00 / 1000000  // $12.00 per 1M tokens
+      input: 3.00 / 1000000,
+      output: 12.00 / 1000000
+    },
+    'claude-3-sonnet': {
+      input: 3.00 / 1000000,
+      output: 15.00 / 1000000
+    },
+    'claude-3-haiku': {
+      input: 0.80 / 1000000,
+      output: 4.00 / 1000000
     }
   };
 

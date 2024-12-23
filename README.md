@@ -17,6 +17,12 @@ This is based on [Kristian Freeman's aiwriter](https://github.com/kristianfreema
   - `gpt-4o` (default)
   - `gpt-4o-mini`
   - `o1-mini`
+  - Claude 3.5 Models:
+    - `claude-3-5-sonnet` ($3.00/1M input, $15.00/1M output tokens)
+    - `claude-3-5-haiku` ($0.80/1M input, $4.00/1M output tokens)
+  - Claude 3 Models:
+    - `claude-3-sonnet` ($3.00/1M input, $15.00/1M output tokens)
+    - `claude-3-haiku` ($0.25/1M input, $1.25/1M output tokens)
 - `source_dir` (optional): Directory name under 'sources' to use for local content ingestion
 - `use_web` (optional): Set to "false" to disable web search and only use local sources
 

@@ -5,8 +5,12 @@ const { calculateCost } = require("./serp");
 const wordcount = require("word-count");
 
 const generateArticle = async (topic, summaries, activeModel) => {
-  // Add debug logging
   console.log(`Starting article generation with ${summaries.length} summaries`);
+  
+  // Use Anthropic handler for Claude models
+  if (activeModel.startsWith('claude-')) {
+    return generateArticleWithAnthropic(topic, summaries, activeModel);
+  }
   
   // Separate local and web sources
   const localSources = summaries.filter(s => s.isLocal).map(s => s.content);
@@ -182,6 +186,57 @@ ${sourceMaterials}`
         data: error.response.data
       });
     }
+    throw error;
+  }
+};
+
+const generateArticleWithAnthropic = async (topic, summaries, activeModel) => {
+  const { anthropicClient, getAnthropicModelId } = require('./anthropic');
+  const fullModelId = getAnthropicModelId(activeModel);
+  logger.info(`Using Anthropic model: ${fullModelId} for article generation`);
+  
+  // Reuse existing source material preparation
+  const localSources = summaries.filter(s => s.isLocal).map(s => s.content);
+  const webSources = summaries
+    .filter(s => !s.isLocal)
+    .map(s => `Source: ${s.source}\n${s.content}`);
+  const hasLocalSources = localSources.length > 0;
+
+  const sourceMaterials = hasLocalSources 
+    ? `PRIMARY SOURCE MATERIALS:\n${localSources.join("\n\n---\n\n")}\n\nSUPPORTING WEB RESEARCH:\n${webSources.join("\n\n---\n\n")}`
+    : `SOURCE MATERIALS:\n${webSources.join("\n\n---\n\n")}`;
+
+  try {
+    logger.info('Sending request to Anthropic...');
+    const response = await anthropicClient.messages.create({
+      model: fullModelId,  // This will be the full ID like claude-3-5-haiku-20241022
+      max_tokens: ARTICLE_MAX_TOKENS,
+      messages: [{
+        role: 'user',
+        content: `Write an engaging web article about ${topic}...
+
+SOURCE MATERIALS:
+${sourceMaterials}`
+      }]
+    });
+
+    const usage = {
+      prompt_tokens: response.usage.input_tokens,
+      completion_tokens: response.usage.output_tokens,
+      total_tokens: response.usage.input_tokens + response.usage.output_tokens
+    };
+
+    const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, activeModel);
+
+    logger.info(`Generated article length: ${response.content.length} characters`);
+
+    return {
+      content: response.content,
+      usage,
+      cost
+    };
+  } catch (error) {
+    logger.error('Error in Anthropic article generation:', error);
     throw error;
   }
 };
