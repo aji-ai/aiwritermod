@@ -30,7 +30,12 @@ ${webSources.join("\n\n---\n\n")}`;
     ? `- Prioritize and heavily quote from PRIMARY SOURCE MATERIALS
 - Use web sources only to supplement primary source information
 - Each major claim should start with primary source information
-- Maintain original terminology from primary sources`
+- Maintain original terminology from primary sources
+- Every biographical claim must include a direct link to the source
+- Mark any information not from official sources as "reportedly" or "according to"
+- If conflicting information exists between sources, only use official sources
+- Include a disclaimer for any section using non-official sources
+- Do not make assumptions about educational background or credentials`
     : `- Use information from provided sources
 - Include relevant quotes with proper attribution
 - Maintain consistent terminology throughout`;
