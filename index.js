@@ -5,73 +5,100 @@ require("dotenv").config();
 
 const wordcount = require("word-count");
 
-const { createWordpressDraft } = require("./api");
+const { getModel, openaiClient } = require("./api");
 const { generateArticle, generateTitles } = require("./gen");
 const { logger } = require("./logger")
-const { queryDdg, summarizeContent } = require("./serp");
+const { queryDdg, summarizeContent, queryLocalDir } = require("./serp");
 
 const { serve } = require("@hono/node-server");
 const { Hono } = require("hono");
 
-const readKeywords = () => {
-  const files = fs.readdirSync("./keywords");
-  return files;
-};
-
-const main = async (keyword, skipPublish = false) => {
+const main = async (keyword, options = {}) => {
+  const { sourceDir = null, useWeb = true, model: customModel = null } = options;
+  const activeModel = customModel || getModel();
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalCost = 0;
+  
   if (!keyword) {
-    logger.info("Please provide a keyword");
-    return;
+    throw new Error("Please provide a keyword");
   }
 
   logger.info(`Processing keyword: ${keyword}`);
 
-  // const results = await queryGoogle(keyword);
-  const results = await queryDdg(keyword);
+  let results = [];
+  
+  if (useWeb) {
+    logger.info("Performing web search...");
+    results = await queryDdg(keyword);
+  } else {
+    logger.info("Skipping web search...");
+  }
+  
+  if (sourceDir) {
+    const localResults = await queryLocalDir(keyword, sourceDir);
+    results = [...results, ...localResults];
+  }
 
   if (results.length === 0) {
-    logger.info(
-      "No results found. Something might be wrong with this keyword. Skipping...",
-    );
-    return;
+    throw new Error("No results found. Please check your sources or keyword.");
   }
 
   let summaries = [];
-
   for (const result of results) {
-    logger.info(`PROCESSING "${result.title} - ${result.url}"`);
-    const summary = await summarizeContent(result.url);
-    summaries.push(summary);
+    if (result.isLocal) {
+      logger.info(`PROCESSING LOCAL "${result.title}"`);
+      summaries.push({ 
+        content: result.content,
+        isLocal: true 
+      });
+    } else {
+      logger.info(`PROCESSING WEB "${result.title} - ${result.url}"`);
+      const summary = await summarizeContent(result.url);
+      if (summary?.usage) {
+        totalInputTokens += summary.usage.prompt_tokens;
+        totalOutputTokens += summary.usage.completion_tokens;
+        if (summary.cost) totalCost += summary.cost.totalCost;
+      }
+      summaries.push({
+        ...summary,
+        isLocal: false 
+      });
+    }
   }
   logger.info(`Summarized ${summaries.length} articles. Generating article...`);
 
-  const article = await generateArticle(keyword, summaries);
-  logger.info(`Article generated. ${wordcount(article)} words`);
-
-  const titles = await generateTitles(keyword);
-  logger.info(`Titles generated: \n${titles}`);
-
-  const fileContent = `
-    ${titles} 
-
-    ${article}
-  `;
-
-  const enableWordpress = process.env.ENABLE_WORDPRESS;
-  if (!skipPublish && enableWordpress) {
-    logger.info(`Creating Wordpress draft with title: ${keyword}`);
-    await createWordpressDraft(keyword, fileContent);
-    logger.info(`Wordpress draft created`);
+  const article = await generateArticle(keyword, summaries, activeModel);
+  if (article?.usage) {
+    totalInputTokens += article.usage.prompt_tokens;
+    totalOutputTokens += article.usage.completion_tokens;
+    if (article.cost) totalCost += article.cost.totalCost;
   }
 
-  fs.writeFileSync(`./articles/${keyword}.md`, fileContent);
-  logger.info(`Article saved to ./articles/${keyword}.md`);
+  const fileContent = `${article.content}`;
 
-  // logger.info(`Deleting keyword file`);
-  // fs.unlinkSync(`./keywords/${keyword}`);
+fs.writeFileSync(`./articles/${keyword}.md`, fileContent);
+logger.info(`Article saved to ./articles/${keyword}.md`);
 
-  logger.info("DONE");
-  return { keyword, titles, article };
+  logger.info(`DONE - Usage Summary:
+    Model: ${activeModel}
+    Input tokens: ${totalInputTokens}
+    Output tokens: ${totalOutputTokens}
+    Total tokens: ${totalInputTokens + totalOutputTokens}
+    Estimated cost: $${totalCost.toFixed(4)}
+  `);
+
+  return {
+    keyword,
+    article,
+    usage: {
+      model: activeModel,
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
+      total_tokens: totalInputTokens + totalOutputTokens,
+      estimated_cost: totalCost
+    }
+  };
 };
 
 const run = async () => {
@@ -83,14 +110,43 @@ const run = async () => {
 
 const app = new Hono();
 app.get("/", async (c) => {
-  const keyword = c.req.query("keyword");
-  const skipPublish = !!c.req.query("skip_publish") || false;
-  if (!keyword) {
-    return c.throw(400, "Please provide a keyword");
-  }
+  try {
+    const keywordParam = c.req.query("keyword");
+    const sourceDir = c.req.query("source_dir");
+    const useWeb = c.req.query("use_web") !== "false";
+    const modelParam = c.req.query("model");
+    
+    if (!keywordParam) {
+      return c.json({ 
+        error: "Please provide at least one keyword" 
+      }, 400);
+    }
 
-  const result = await main(keyword, skipPublish);
-  return c.json(result);
+    const keywords = keywordParam.split(',').map(k => k.trim());
+    const results = [];
+    
+    for (const keyword of keywords) {
+      try {
+        const result = await main(keyword, { 
+          sourceDir, 
+          useWeb,
+          model: modelParam
+        });
+        results.push(result);
+      } catch (err) {
+        results.push({
+          keyword,
+          error: err.message
+        });
+      }
+    }
+
+    return c.json(results);
+  } catch (err) {
+    return c.json({ 
+      error: err.message 
+    }, 500);
+  }
 });
 
 const port = process.env.PORT || "5139";
