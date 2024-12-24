@@ -12,7 +12,7 @@ This is based on [Kristian Freeman's aiwriter](https://github.com/kristianfreema
    Required API keys:
    - `OPENAI_API_KEY` - For GPT models
    - `ANTHROPIC_API_KEY` - For Claude models
-3. Run the application: `node index.js`
+3. Run the application: `node index.js` or better yet `npm run fstart`
 
 ## Usage
 

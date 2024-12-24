@@ -5,11 +5,16 @@ const { calculateCost } = require("./serp");
 const wordcount = require("word-count");
 
 const analyzeSourceRelevance = async (topic, localSources) => {
-  // Extract key terms from the topic
-  const topicTerms = topic.toLowerCase().split(/\s+/);
+  logger.info('Starting source analysis...', { 
+    topic,
+    sourceCount: localSources.length,
+    firstSourcePreview: localSources[0]?.substring(0, 100) // Show start of first source
+  });
   
-  // Have the LLM analyze the sources
-  const analysisPrompt = `TASK: Analyze these academic/technical source materials and extract their key themes and topics.
+  const topicTerms = topic.toLowerCase().split(/\s+/);
+  logger.info('Topic terms:', { terms: topicTerms });
+  
+  const analysisPrompt = `TASK: Analyze these source materials and extract their key themes and ideas.
 
 SOURCE MATERIALS:
 ${localSources.join("\n\n---\n\n")}
@@ -17,20 +22,19 @@ ${localSources.join("\n\n---\n\n")}
 OUTPUT REQUIREMENTS:
 1. Main Topics: List the primary topics/themes discussed across all sources
 2. Key Concepts: Extract important theoretical frameworks and concepts
-3. Technologies: Identify specific technologies, systems, or implementations mentioned
-4. Applications: List concrete applications or use cases described
 
 Format the output as JSON with these exact keys:
 {
   "mainTopics": [],
-  "concepts": [],
-  "technologies": [],
-  "applications": []
+  "concepts": []
 }`;
 
   try {
+    logger.info('Sending analysis request to OpenAI...');
+    
+    // Await the response from OpenAI
     const response = await openaiClient.chat.completions.create({
-      model: 'gpt-4o-mini',  // Use a smaller model for analysis
+      model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
         content: analysisPrompt
@@ -39,37 +43,56 @@ Format the output as JSON with these exact keys:
       response_format: { type: "json_object" }
     });
 
+    // Log the response after it has been received
+//    logger.info(`Response: ${JSON.stringify(response, null, 2)}`);
+    logger.info(`${response.choices[0].message.content}`);
+
     const analysis = JSON.parse(response.choices[0].message.content);
 
-    // Check topic relevance
+    logger.info(`Main Topics:\n ${analysis.mainTopics} \nConcepts:\n ${analysis.concepts}`);
+
     const topicOverlap = topicTerms.some(term => 
       analysis.mainTopics.some(topic => topic.toLowerCase().includes(term)) ||
-      analysis.concepts.some(concept => concept.toLowerCase().includes(term)) ||
-      analysis.technologies.some(tech => tech.toLowerCase().includes(term))
+      analysis.concepts.some(concept => concept.toLowerCase().includes(term))
     );
 
-    return {
-      isRelevant: true,
+    const result = {
+      isRelevant: topicOverlap,
       sourceThemes: {
         mainTopic: analysis.mainTopics.join('; '),
         concepts: analysis.concepts,
-        technologies: analysis.technologies,
-        applications: analysis.applications
       },
       suggestedFocus: topicOverlap
-        ? `These sources discuss ${analysis.mainTopics.join(', ')}, which relate to ${topic} through shared concepts in ${analysis.concepts.join(', ')}`
-        : `While these sources focus on ${analysis.mainTopics.join(', ')}, they contain relevant technological and conceptual frameworks that can inform our understanding of ${topic}`
+        ? `These sources discuss ${analysis.mainTopics.join(', ')}, which relate to ${topic} through shared ideas in ${analysis.concepts.join(', ')}`
+        : `While these sources focus on ${analysis.mainTopics.join(', ')}, they contain relevant ideas that can inform our understanding of ${topic}`
     };
+
+    // Log the final analysis result
+    // convert it to back tick
+    logger.info('Final analysis result:', {
+      isRelevant: result.isRelevant,
+      mainTopic: result.sourceThemes.mainTopic,
+      conceptCount: result.sourceThemes.concepts.length,
+      suggestedFocus: result.suggestedFocus
+    });
+    logger.info(`Final analysis result: ${result.isRelevant}\n${result.sourceThemes.mainTopic}\n${result.sourceThemes.concepts}\n${result.suggestedFocus}`);
+
+    return result;
+
   } catch (error) {
     logger.error('Error analyzing source relevance:', error);
-    // Fallback to basic analysis if LLM fails
+    if (error.response) {
+      logger.error('OpenAI Error details:', {
+        status: error.response.status,
+        message: error.response.statusText,
+        data: error.response.data
+      });
+    }
     return {
-      isRelevant: true,
+      isRelevant: false,
       sourceThemes: {
         mainTopic: topic,
         concepts: [],
-        technologies: [],
-        applications: []
       },
       suggestedFocus: `Analyzing ${topic} using available source materials`
     };
@@ -98,24 +121,16 @@ const generateArticle = async (topic, summaries, activeModel) => {
     })
     .filter(Boolean);  // Remove any null/undefined entries
 
-    const hasLocalSources = localSources.length > 0;
+  let sourceAnalysis = null; // Declare it here
+  const hasLocalSources = localSources.length > 0;
   
-    // Add source analysis for OpenAI path
-    const sourceAnalysis = hasLocalSources ? await analyzeSourceRelevance(topic, localSources) : null;
+  if (hasLocalSources) {
+    logger.info(`Found ${localSources.length} local sources to analyze`);
+    sourceAnalysis = await analyzeSourceRelevance(topic, localSources);
+  } else {
+    logger.info('No local sources found for analysis');
+  }
 
-    // Add source analysis logging
-    if (sourceAnalysis) {
-      logger.info('*** Source analysis results (OpenAI):', {
-        isRelevant: sourceAnalysis.isRelevant,
-        mainTopic: sourceAnalysis.sourceThemes.mainTopic,
-        concepts: sourceAnalysis.sourceThemes.concepts,
-        technologies: sourceAnalysis.sourceThemes.technologies,
-        applications: sourceAnalysis.sourceThemes.applications,
-        suggestedFocus: sourceAnalysis.suggestedFocus
-      });
-    }
-
-    
   const webSources = summaries
     .filter(s => !s.isLocal)
     .map(s => `Source: ${s.source}\n${s.content}`);
@@ -161,7 +176,7 @@ ${webSources.join("\n\n---\n\n")}`;
 - Draw connections while maintaining factual accuracy
 - Clearly indicate when making comparative analyses`
     : `NOTE: Use available sources to:
-- Identify relevant technological and conceptual parallels
+- Identify relevant conceptual parallels
 - Compare methodological approaches
 - Draw appropriate connections
 - Maintain clear source attribution
@@ -273,6 +288,9 @@ OUTPUT FORMAT:
     logger.info('Response received from OpenAI');
     logger.debug('Raw response:', JSON.stringify(response, null, 2));
     
+    logger.info('Model used:', response.model);
+    logger.info('First choice content:', response.choices[0].message.content);
+
     if (activeModel.startsWith('o1')) {
       // Log the entire response structure for debugging
       logger.info('o1 Response structure:', {
@@ -373,8 +391,6 @@ const generateArticleWithAnthropic = async (topic, summaries, activeModel) => {
       isRelevant: sourceAnalysis.isRelevant,
       mainTopic: sourceAnalysis.sourceThemes.mainTopic,
       concepts: sourceAnalysis.sourceThemes.concepts,
-      technologies: sourceAnalysis.sourceThemes.technologies,
-      applications: sourceAnalysis.sourceThemes.applications,
       suggestedFocus: sourceAnalysis.suggestedFocus
     });
   }
