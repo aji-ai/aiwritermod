@@ -5,42 +5,46 @@ This is based on [Kristian Freeman's aiwriter](https://github.com/kristianfreema
 ## Getting Started
 
 1. Install the required dependencies: `npm install`
-2. Create a `.env` file and provide the necessary environment variables (e.g., API keys, credentials): `cp .env.example .env` and fill it out
-4. Run the application: `node index.js`
+2. Create a `.env` file and provide the necessary environment variables:
+   ```
+   cp .env.example .env
+   ```
+   Required API keys:
+   - `OPENAI_API_KEY` - For GPT models
+   - `ANTHROPIC_API_KEY` - For Claude models
+3. Run the application: `node index.js`
 
 ## Usage
 
 **HTTP Server**: The application runs an HTTP server that listens for GET requests at the `/` endpoint with the following parameters:
 
 - `keyword` (required): The search term or topic to generate content about
-- `model` (optional): The AI model to use for generation. Available options:
-  - `gpt-4o` (default)
-  - `gpt-4o-mini`
-  - `o1-mini`
-  - Claude 3.5 Models:
-    - `claude-3-5-sonnet` ($3.00/1M input, $15.00/1M output tokens)
-    - `claude-3-5-haiku` ($0.80/1M input, $4.00/1M output tokens)
-  - Claude 3 Models:
-    - `claude-3-sonnet` ($3.00/1M input, $15.00/1M output tokens)
-    - `claude-3-haiku` ($0.25/1M input, $1.25/1M output tokens)
+- `model` (optional): The AI model to use for generation (see Models & Pricing below)
 - `source_dir` (optional): Directory name under 'sources' to use for local content ingestion
-- `use_web` (optional): Set to "false" to disable web search and only use local sources
 
-## Example
+## Models & Pricing
 
-Just use the web
+| Model | Input Cost (per 1M tokens) | Output Cost (per 1M tokens) |
+|-------|---------------------------|----------------------------|
+| gpt-4o (default) | $2.50 | $10.00 |
+| gpt-4o-mini | $0.15 | $0.60 |
+| o1-mini | $3.00 | $12.00 |
+| claude-3-5-sonnet | $3.00 | $15.00 |
+| claude-3-5-haiku | $0.80 | $4.00 |
+| claude-3-sonnet | $3.00 | $15.00 |
+| claude-3-haiku | $0.25 | $1.25 |
 
-```
-curl "http://localhost:5139/?keyword=openai+latest&model=o1-mini"
-```
+## Examples
 
-Use local sources (ingests all files in the 'sources' subdirectory)
+Using web search only:
 
-```
-curl "http://localhost:5139/?keyword=hiroshi+ishii+teleabsence&model=gpt-4o&source_dir=ishii"
-```
+curl "http://localhost:5139/?keyword=openai+latest&model=o1-mini" 
 
-In this example in the directory `sources/ishii` there are files that will be ingested and used to generate the article. That looks in a file system like:
+Using local sources:
+
+curl "http://localhost:5139/?keyword=hiroshi+ishii+teleabsence&model=claude-3-5-sonnet&source_dir=ishii"
+
+The local sources should be organized as:
 
 ```
 sources/
@@ -50,7 +54,7 @@ sources/
     ishii-3.md
 ```
 
-It's best to give it markdown files right now.
+The model will read all the files in the directory and the article will be heavily influenced by the content of the files.
 
 ## Output Format
 
@@ -59,43 +63,33 @@ The API returns a JSON response with the following structure:
 ```
 json
 {
-    "keyword": "your-search-term",
-    "article": {
-        "content": "The generated article in markdown format",
-        "usage": {
-        "prompt_tokens": 123,
-        "completion_tokens": 456,
-        "total_tokens": 579
-        },
-    "cost": {
-        "inputCost": 0.000123,
-        "outputCost": 0.000456,
-        "totalCost": 0.000579
-        }
-    },
-    "usage": {
-        "model": "gpt-4o",
-        "input_tokens": 1000,
-        "output_tokens": 2000,
-        "total_tokens": 3000,
-        "estimated_cost": 0.00123
-    }
+"keyword": "your-search-term",
+"article": {
+"content": "The generated article in markdown format",
+"usage": {
+"prompt_tokens": 123,
+"completion_tokens": 456,
+"total_tokens": 579
+},
+"cost": {
+"inputCost": 0.000123,
+"outputCost": 0.000456,
+"totalCost": 0.000579
+}
+},
+"usage": {
+"model": "gpt-4o",
+"input_tokens": 1000,
+"output_tokens": 2000,
+"total_tokens": 3000,
+"estimated_cost": 0.00123
+}
 }
 ```
 
-
-Costs are calculated based on the model used (https://openai.com/pricing/ in 2024)
-
-| Model | Input Cost (per 1M tokens) | Output Cost (per 1M tokens) |
-|-------|---------------------------|----------------------------|
-| gpt-4o | $2.50 | $10.00 |
-| gpt-4o-mini | $0.15 | $0.60 |
-| o1-mini | $3.00 | $12.00 |
-
-If there's an error, the response will look like:
+If there's an error:
 
 ```
-json
 {
 "keyword": "your-search-term",
 "error": "Error message describing what went wrong"

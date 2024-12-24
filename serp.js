@@ -44,36 +44,43 @@ const summarizeContent = async (url, activeModel) => {
   const $ = cheerio.load(text);
   const body = $("h1, h2, h3, h4, h5, h6, p");
 
-  const content = `
-    Helpfully summarize the following content:
+  const content = body.text().slice(0, 14000);
 
-    ${body.text().slice(0, 14000)}
-  `;
+  // Use gpt-4o for summarization when main model is o1-mini
+  const summaryModel = activeModel.startsWith('o1-mini') ? 'gpt-4o' : activeModel;
+  logger.info(`Using ${summaryModel} for summarization (main model: ${activeModel})`);
+
+  // Common summary prompt for all models
+  const summaryPrompt = `TASK: Create a detailed summary of the provided content.
+
+OUTPUT REQUIREMENTS:
+1. Extract key facts and events with their exact source
+2. Preserve important quotes verbatim with attribution
+3. Include specific dates and numbers exactly as stated
+4. Maintain original context without inference
+5. Focus on concrete details over analysis
+6. For biographical information:
+   - Only include facts explicitly stated in the source
+   - Do not make assumptions about education, affiliations, or career paths
+   - If information is unclear or missing, explicitly state that
+   - Use qualifying language like "according to [source]" for each claim
+
+CONTENT TO SUMMARIZE:
+${content}`;
 
   // Handle Anthropic models
-  if (activeModel.startsWith('claude-')) {
+  if (summaryModel.startsWith('claude-')) {
     const { anthropicClient, getAnthropicModelId } = require('./anthropic');
-    const fullModelId = getAnthropicModelId(activeModel);
+    const fullModelId = getAnthropicModelId(summaryModel);
     logger.info(`Using Anthropic model: ${fullModelId} for summarization`);
+    
     try {
       const response = await anthropicClient.messages.create({
         model: fullModelId,
         max_tokens: SUMMARY_MAX_TOKENS,
         messages: [{
           role: 'user',
-          content: `TASK: Create a detailed summary of the provided content.
-
-OUTPUT REQUIREMENTS:
-1. Extract key facts and events
-2. Preserve important quotes verbatim
-3. Include specific dates and numbers
-4. Maintain original context
-5. Focus on concrete details over analysis
-
-CONTENT TO SUMMARIZE:
-${content}
-
-Begin the summary now:`
+          content: summaryPrompt
         }]
       });
 
@@ -83,7 +90,7 @@ Begin the summary now:`
         total_tokens: response.usage.input_tokens + response.usage.output_tokens
       };
 
-      const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, activeModel);
+      const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, summaryModel);
 
       return {
         content: response.content,
@@ -97,65 +104,50 @@ Begin the summary now:`
     }
   }
 
-  const messages = [];
-  
-  if (activeModel.startsWith('o1')) {
-    messages.push({
+  // Handle OpenAI models
+  // Handle OpenAI models
+  let messages;
+  if (summaryModel.startsWith('o1')) {
+    messages = [{
       role: "user",
-      content: `TASK: Create a detailed summary of the provided content.
+      content: `You are an expert at creating concise, accurate summaries. Focus on extracting key facts and maintaining original context without inference or assumptions.
 
-OUTPUT REQUIREMENTS:
-1. Extract key facts and events
-2. Preserve important quotes verbatim
-3. Include specific dates and numbers
-4. Maintain original context
-5. Focus on concrete details over analysis
-
-CONTENT TO SUMMARIZE:
-${content}
-
-Begin the summary now:`
-    });
+${summaryPrompt}`
+    }];
   } else {
-    messages.push({
+    messages = [{
       role: "system",
-      content: "You are an expert at creating engaging web content that makes complex topics accessible while maintaining accuracy. Only use information explicitly stated in the provided sources. Do not make assumptions or add information not present in the sources. If dates or specific details are unclear, use qualifying language or omit them."
-    });
-    messages.push({
+      content: "You are an expert at creating concise, accurate summaries. Focus on extracting key facts and maintaining original context without inference or assumptions."
+    }, {
       role: "user",
-      content: `Write an engaging web article about ${topic}.
-
-Key requirements:
-- Use clear, accessible language
-- Include relevant quotes from sources with proper attribution
-- Only include dates and facts that are explicitly mentioned in the sources
-- If uncertain about specific details, use phrases like "around" or "approximately"
-- Structure for web readability
-- Minimum ${minimumWordCount} words
-- Format in Markdown
-- End with practical takeaways
-- Each major claim should reference which source it came from
-
-SOURCE MATERIALS:
-${sourceMaterials}`
-    });
+      content: summaryPrompt
+    }];
   }
-
+  
   try {
-    const response = await openaiClient.chat.completions.create({
-      model: activeModel,
-      messages,
-      max_completion_tokens: SUMMARY_MAX_TOKENS
-    });
+    const completionOptions = {
+      model: summaryModel,
+      messages
+    };
+
+    // Add different token limits and temperature based on model type
+    if (summaryModel.startsWith('o1')) {
+      completionOptions.max_completion_tokens = SUMMARY_MAX_TOKENS;
+    } else {
+      completionOptions.max_tokens = SUMMARY_MAX_TOKENS;
+      completionOptions.temperature = 0.3;  // Keep low temperature for non-o1 models
+    }
+
+    const response = await openaiClient.chat.completions.create(completionOptions);
 
     const usage = response.usage;
-    const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, activeModel);
+    const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, summaryModel);
 
     logger.info(`Web content summarization tokens used: ${JSON.stringify({
       prompt_tokens: usage.prompt_tokens,
       completion_tokens: usage.completion_tokens,
       total_tokens: usage.total_tokens,
-      model: activeModel,
+      model: summaryModel,
       estimated_cost: cost.totalCost
     })}`);
 

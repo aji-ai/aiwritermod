@@ -4,6 +4,79 @@ const { calculateCost } = require("./serp");
 
 const wordcount = require("word-count");
 
+const analyzeSourceRelevance = async (topic, localSources) => {
+  // Extract key terms from the topic
+  const topicTerms = topic.toLowerCase().split(/\s+/);
+  
+  // Have the LLM analyze the sources
+  const analysisPrompt = `TASK: Analyze these academic/technical source materials and extract their key themes and topics.
+
+SOURCE MATERIALS:
+${localSources.join("\n\n---\n\n")}
+
+OUTPUT REQUIREMENTS:
+1. Main Topics: List the primary topics/themes discussed across all sources
+2. Key Concepts: Extract important theoretical frameworks and concepts
+3. Technologies: Identify specific technologies, systems, or implementations mentioned
+4. Applications: List concrete applications or use cases described
+
+Format the output as JSON with these exact keys:
+{
+  "mainTopics": [],
+  "concepts": [],
+  "technologies": [],
+  "applications": []
+}`;
+
+  try {
+    const response = await openaiClient.chat.completions.create({
+      model: 'gpt-4o-mini',  // Use a smaller model for analysis
+      messages: [{
+        role: 'user',
+        content: analysisPrompt
+      }],
+      temperature: 0.1,
+      response_format: { type: "json_object" }
+    });
+
+    const analysis = JSON.parse(response.choices[0].message.content);
+
+    // Check topic relevance
+    const topicOverlap = topicTerms.some(term => 
+      analysis.mainTopics.some(topic => topic.toLowerCase().includes(term)) ||
+      analysis.concepts.some(concept => concept.toLowerCase().includes(term)) ||
+      analysis.technologies.some(tech => tech.toLowerCase().includes(term))
+    );
+
+    return {
+      isRelevant: true,
+      sourceThemes: {
+        mainTopic: analysis.mainTopics.join('; '),
+        concepts: analysis.concepts,
+        technologies: analysis.technologies,
+        applications: analysis.applications
+      },
+      suggestedFocus: topicOverlap
+        ? `These sources discuss ${analysis.mainTopics.join(', ')}, which relate to ${topic} through shared concepts in ${analysis.concepts.join(', ')}`
+        : `While these sources focus on ${analysis.mainTopics.join(', ')}, they contain relevant technological and conceptual frameworks that can inform our understanding of ${topic}`
+    };
+  } catch (error) {
+    logger.error('Error analyzing source relevance:', error);
+    // Fallback to basic analysis if LLM fails
+    return {
+      isRelevant: true,
+      sourceThemes: {
+        mainTopic: topic,
+        concepts: [],
+        technologies: [],
+        applications: []
+      },
+      suggestedFocus: `Analyzing ${topic} using available source materials`
+    };
+  }
+};
+
+
 const generateArticle = async (topic, summaries, activeModel) => {
   console.log(`Starting article generation with ${summaries.length} summaries`);
   
@@ -13,56 +86,105 @@ const generateArticle = async (topic, summaries, activeModel) => {
   }
   
   // Separate local and web sources
-  const localSources = summaries.filter(s => s.isLocal).map(s => s.content);
+  const localSources = summaries
+    .filter(s => s.isLocal)
+    .map(s => {
+      logger.debug('Processing local source:', {
+        hasContent: !!s.content,
+        contentType: typeof s.content,
+        contentLength: s.content?.length
+      });
+      return s.content;
+    })
+    .filter(Boolean);  // Remove any null/undefined entries
+
+    const hasLocalSources = localSources.length > 0;
+  
+    // Add source analysis for OpenAI path
+    const sourceAnalysis = hasLocalSources ? await analyzeSourceRelevance(topic, localSources) : null;
+
+    // Add source analysis logging
+    if (sourceAnalysis) {
+      logger.info('*** Source analysis results (OpenAI):', {
+        isRelevant: sourceAnalysis.isRelevant,
+        mainTopic: sourceAnalysis.sourceThemes.mainTopic,
+        concepts: sourceAnalysis.sourceThemes.concepts,
+        technologies: sourceAnalysis.sourceThemes.technologies,
+        applications: sourceAnalysis.sourceThemes.applications,
+        suggestedFocus: sourceAnalysis.suggestedFocus
+      });
+    }
+
+    
   const webSources = summaries
     .filter(s => !s.isLocal)
     .map(s => `Source: ${s.source}\n${s.content}`);
-  const hasLocalSources = localSources.length > 0;
 
   const minimumWordCount = 1700;
 
+  // Construct source materials based on what's available
   const sourceMaterials = hasLocalSources 
     ? `PRIMARY SOURCE MATERIALS (direct quotes and key ideas must be used from these):
 ${localSources.join("\n\n---\n\n")}
 
-SUPPORTING WEB RESEARCH:
+${webSources.length > 0 
+  ? `SUPPORTING WEB RESEARCH:
 ${webSources.join("\n\n---\n\n")}`
-    : `SOURCE MATERIALS:
+  : "No web sources available"}`
+    : `WEB RESEARCH MATERIALS:
 ${webSources.join("\n\n---\n\n")}`;
 
+  // Adjust requirements based on source availability
   const sourceRequirements = hasLocalSources 
-    ? `- Prioritize and heavily quote from PRIMARY SOURCE MATERIALS
-- Use web sources only to supplement primary source information
-- Each major claim should start with primary source information
+    ? `CRITICAL SOURCE REQUIREMENTS:
+- Start with and heavily quote from PRIMARY SOURCE MATERIALS
+- Use primary source framework and concepts as the foundation
+- Each major section must begin with primary source content
+- Only use web sources to supplement primary source information
 - Maintain original terminology from primary sources
-- Every biographical claim must include a direct link to the source
-- Mark any information not from official sources as "reportedly" or "according to"
-- If conflicting information exists between sources, only use official sources
-- Include a disclaimer for any section using non-official sources
-- Do not make assumptions about educational background or credentials`
-    : `- Use information from provided sources
+- Clearly mark any comparative analysis or connections
+- If source material differs from the topic, explain how concepts relate
+- Include explicit source attributions for all claims`
+    : `SOURCE REQUIREMENTS:
+- Use information only from provided web sources
 - Include relevant quotes with proper attribution
-- Maintain consistent terminology throughout`;
+- Maintain consistent terminology
+- Clearly state when making interpretations
+- Mark any uncertain information with qualifying language`;
 
-  const messages = [];
-  
-  if (activeModel.startsWith('o1')) {
-    const sourceContext = hasLocalSources 
-      ? `SOURCE HIERARCHY:
+  // Construct contextual guidance only if we have valid local sources
+  const contextualGuidance = hasLocalSources && sourceAnalysis
+    ? `CONTENT APPROACH:
+- Primary source focuses on: ${sourceAnalysis.sourceThemes.mainTopic}
+- Key concepts to incorporate: ${sourceAnalysis.sourceThemes.concepts.join(', ')}
+- Use these concepts as analytical framework when examining ${topic}
+- Draw connections while maintaining factual accuracy
+- Clearly indicate when making comparative analyses`
+    : `NOTE: Use available sources to:
+- Identify relevant technological and conceptual parallels
+- Compare methodological approaches
+- Draw appropriate connections
+- Maintain clear source attribution
+- Be explicit about analytical scope`;
+
+  const sourceContext = hasLocalSources 
+    ? `SOURCE HIERARCHY:
 1. PRIMARY SOURCES: Direct, authoritative materials that must be heavily quoted and prioritized
 2. WEB SOURCES: Supporting information to provide additional context only`
-      : `SOURCE CONTEXT:
+    : `SOURCE CONTEXT:
 All sources are from web research and should be treated with equal weight`;
 
-    const processSteps = hasLocalSources
-      ? `1. First analyze PRIMARY SOURCES to identify key themes and verified facts
+  const processSteps = hasLocalSources
+    ? `1. First analyze PRIMARY SOURCES to identify key themes and verified facts
 2. Then review WEB SOURCES for supporting context
 3. Organize information prioritizing PRIMARY SOURCE content`
-      : `1. Analyze all sources to identify key themes and verified facts
+    : `1. Analyze all sources to identify key themes and verified facts
 2. Cross-reference information across multiple sources when possible
 3. Organize information into a coherent narrative`;
 
-    messages.push({
+  let messages;
+  if (activeModel.startsWith('o1')) {
+    messages = [{
       role: "user",
       content: `TASK: Write an engaging web article about ${topic} based on the provided sources.
 
@@ -102,38 +224,32 @@ OUTPUT REQUIREMENTS:
    - Maintain strict factual accuracy
    - Indicate source for each major claim
 
-EVALUATION CRITERIA:
-1. Source Adherence: Every claim must be directly supported by source materials
-2. Accuracy: No inferred or speculated information
-3. Transparency: Clear acknowledgment of information gaps
-4. Readability: Content should be easily understood by general audience
-5. Structure: Organized for web reading patterns
-
 SOURCE MATERIALS:
 ${sourceMaterials}
 
 Begin by analyzing the sources, then write the article following the process above while strictly adhering to the critical requirements.`
-    });
+    }];
   } else {
-    messages.push({ 
-      role: "system", 
-      content: "You are an expert at creating engaging web content that makes complex topics accessible while maintaining accuracy. Write in a conversational style and only use information from provided sources." 
-    });
-    messages.push({ 
-      role: "user", 
+    messages = [{
+      role: "system",
+      content: "You are an expert at creating engaging web content that makes complex topics accessible while maintaining strict source accuracy. You excel at drawing meaningful connections while clearly separating fact from analysis."
+    }, {
+      role: "user",
       content: `Write an engaging web article about ${topic}.
 
-Key requirements:
-- Use clear, accessible language
-- Include relevant quotes from sources
-- Structure for web readability
-- Minimum ${minimumWordCount} words
-- Format in Markdown
-- End with practical takeaways
+${sourceMaterials}
 
-SOURCE MATERIALS:
-${sourceMaterials}` 
-    });
+${sourceRequirements}
+
+${contextualGuidance}
+
+OUTPUT FORMAT:
+- Clear, accessible language
+- Proper source attribution
+- Markdown formatting
+- Minimum ${minimumWordCount} words
+- Include practical takeaways`
+    }];
   }
 
   try {
@@ -155,25 +271,58 @@ ${sourceMaterials}`
     const response = await openaiClient.chat.completions.create(completionOptions);
     
     logger.info('Response received from OpenAI');
-    logger.info('Full response:', JSON.stringify(response, null, 2));
+    logger.debug('Raw response:', JSON.stringify(response, null, 2));
     
-    if (!response.choices?.[0]?.message?.content) {
-      logger.error('Response structure:', JSON.stringify({
+    if (activeModel.startsWith('o1')) {
+      // Log the entire response structure for debugging
+      logger.info('o1 Response structure:', {
         hasChoices: !!response.choices,
         choicesLength: response.choices?.length,
-        hasMessage: !!response.choices?.[0]?.message,
-        content: response.choices?.[0]?.message?.content
-      }));
-      throw new Error('Invalid or empty response from OpenAI');
+        firstChoice: JSON.stringify(response.choices?.[0]),
+        messageStructure: response.choices?.[0]?.message ? 
+          Object.keys(response.choices[0].message) : 'no message object',
+        rawResponse: JSON.stringify(response)  // Add full response logging
+      });
+
+      // Check if we have a valid response
+      if (!response?.choices?.[0]?.message?.content) {
+        logger.error('Invalid o1 response:', {
+          responseType: typeof response,
+          hasChoices: !!response?.choices,
+          choicesLength: response?.choices?.length,
+          firstChoice: response?.choices?.[0],
+          messageContent: response?.choices?.[0]?.message?.content,
+          fullResponse: JSON.stringify(response)
+        });
+        throw new Error('Invalid or empty response from o1 model');
+      }
+    } else {
+      if (!response?.choices?.[0]?.message?.content) {
+        logger.error('OpenAI Response structure:', {
+          response: response,
+          hasChoices: !!response?.choices,
+          choicesLength: response?.choices?.length,
+          hasMessage: !!response?.choices?.[0]?.message,
+          content: response?.choices?.[0]?.message?.content
+        });
+        throw new Error('Invalid or empty response from OpenAI');
+      }
+    }
+
+    let content;
+    if (activeModel.startsWith('o1')) {
+      content = response.choices[0].message.content;
+    } else {
+      content = response.choices[0].message.content;
     }
 
     const usage = response.usage;
     const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, activeModel);
 
-    logger.info(`Generated article length: ${response.choices[0].message.content.length} characters`);
+    logger.info(`Generated article length: ${content.length} characters`);
 
     return {
-      content: response.choices[0].message.content,
+      content,
       usage,
       cost
     };
@@ -196,27 +345,107 @@ const generateArticleWithAnthropic = async (topic, summaries, activeModel) => {
   logger.info(`Using Anthropic model: ${fullModelId} for article generation`);
   
   // Reuse existing source material preparation
-  const localSources = summaries.filter(s => s.isLocal).map(s => s.content);
+  const localSources = summaries
+    .filter(s => s.isLocal && s.content && s.content.trim().length > 0)
+    .map(s => s.content);
+
+  const hasValidLocalSources = localSources.length > 0;
+  logger.info(`Found ${localSources.length} valid local sources`);
+
   const webSources = summaries
     .filter(s => !s.isLocal)
-    .map(s => `Source: ${s.source}\n${s.content}`);
-  const hasLocalSources = localSources.length > 0;
+    .map(s => {
+      let content = '';
+      if (typeof s.content === 'string') {
+        content = s.content;
+      } else if (s.content && typeof s.content === 'object') {
+        content = s.content.text || JSON.stringify(s.content);
+      }
+      return s.source && content ? `WEB SOURCE: ${s.source}\n${content}` : null;
+    })
+    .filter(Boolean);
 
-  const sourceMaterials = hasLocalSources 
+  const sourceAnalysis = hasValidLocalSources ? await analyzeSourceRelevance(topic, localSources) : null;
+
+  // Log source analysis results
+  if (sourceAnalysis) {
+    logger.info('*** Source analysis results:', {
+      isRelevant: sourceAnalysis.isRelevant,
+      mainTopic: sourceAnalysis.sourceThemes.mainTopic,
+      concepts: sourceAnalysis.sourceThemes.concepts,
+      technologies: sourceAnalysis.sourceThemes.technologies,
+      applications: sourceAnalysis.sourceThemes.applications,
+      suggestedFocus: sourceAnalysis.suggestedFocus
+    });
+  }
+
+  // Use the same source context and requirements as OpenAI
+  const sourceContext = hasValidLocalSources 
+    ? `SOURCE HIERARCHY:
+1. PRIMARY SOURCES: Direct, authoritative materials that must be heavily quoted and prioritized
+2. WEB SOURCES: Supporting information to provide additional context only`
+    : `SOURCE CONTEXT:
+All sources are from web research and should be treated with equal weight`;
+
+  const processSteps = hasValidLocalSources
+    ? `1. First analyze PRIMARY SOURCES to identify key themes and verified facts
+2. Then review WEB SOURCES for supporting context
+3. Organize information prioritizing PRIMARY SOURCE content`
+    : `1. Analyze all sources to identify key themes and verified facts
+2. Cross-reference information across multiple sources when possible
+3. Organize information into a coherent narrative`;
+
+  const sourceMaterials = hasValidLocalSources 
     ? `PRIMARY SOURCE MATERIALS:\n${localSources.join("\n\n---\n\n")}\n\nSUPPORTING WEB RESEARCH:\n${webSources.join("\n\n---\n\n")}`
     : `SOURCE MATERIALS:\n${webSources.join("\n\n---\n\n")}`;
+
+  const contextualGuidance = sourceAnalysis?.sourceThemes?.mainTopic 
+    ? `CONTENT APPROACH:
+- Primary source focuses on: ${sourceAnalysis.sourceThemes.mainTopic}
+- Key concepts to incorporate: ${sourceAnalysis.sourceThemes.concepts.join(', ')}
+- Use these concepts as analytical framework when examining ${topic}
+- Draw connections while maintaining factual accuracy
+- Clearly indicate when making comparative analyses`
+    : '';
 
   try {
     logger.info('Sending request to Anthropic...');
     const response = await anthropicClient.messages.create({
-      model: fullModelId,  // This will be the full ID like claude-3-5-haiku-20241022
+      model: fullModelId,
       max_tokens: ARTICLE_MAX_TOKENS,
       messages: [{
         role: 'user',
-        content: `Write an engaging web article about ${topic}...
+        content: `TASK: Write an engaging web article about ${topic} based on the provided sources.
+
+CONTEXT:
+- Target audience: Web readers seeking informative, accessible content
+- Purpose: Educate and inform while maintaining reader engagement
+- Style: Conversational but authoritative
+
+${sourceContext}
+
+${contextualGuidance}
+
+PROCESS:
+${processSteps}
+4. Write in clear, accessible language while maintaining accuracy
+5. Include relevant quotes with proper attribution
+6. Structure content for web readability
+
+OUTPUT REQUIREMENTS:
+1. Format: Clean Markdown with clear section headers
+2. Length: Minimum 1700 words
+3. Structure:
+   - Engaging opening hook based on verified information
+   - Clear section breaks with descriptive headers
+   - Short, focused paragraphs
+   - Natural transitions between ideas
+   - Concluding "Key Takeaways" section
 
 SOURCE MATERIALS:
-${sourceMaterials}`
+${sourceMaterials}
+
+Begin by analyzing the sources, then write the article following the process above while strictly adhering to the requirements.`
       }]
     });
 

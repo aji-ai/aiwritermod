@@ -14,7 +14,7 @@ const { serve } = require("@hono/node-server");
 const { Hono } = require("hono");
 
 const main = async (keyword, options = {}) => {
-  const { sourceDir = null, useWeb = true, model: customModel = null } = options;
+  const { sourceDir = null, model: customModel = null } = options;
   const activeModel = customModel || getModel();
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
@@ -28,14 +28,13 @@ const main = async (keyword, options = {}) => {
 
   let results = [];
   
-  if (useWeb) {
-    logger.info("Performing web search...");
-    results = await queryDdg(keyword);
-  } else {
-    logger.info("Skipping web search...");
-  }
-  
+   // Always perform web search unless explicitly disabled
+   logger.info("Performing web search...");
+   results = await queryDdg(keyword);
+   
+  // Add local sources if sourceDir is provided
   if (sourceDir) {
+    logger.info("Processing local sources...");
     const localResults = await queryLocalDir(keyword, sourceDir);
     results = [...results, ...localResults];
   }
@@ -113,7 +112,6 @@ app.get("/", async (c) => {
   try {
     const keywordParam = c.req.query("keyword");
     const sourceDir = c.req.query("source_dir");
-    const useWeb = c.req.query("use_web") !== "false";
     const modelParam = c.req.query("model");
     
     if (!keywordParam) {
@@ -129,7 +127,6 @@ app.get("/", async (c) => {
       try {
         const result = await main(keyword, { 
           sourceDir, 
-          useWeb,
           model: modelParam
         });
         results.push(result);

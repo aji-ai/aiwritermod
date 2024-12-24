@@ -5,15 +5,27 @@ const anthropicClient = new Anthropic({
 });
 
 const ANTHROPIC_MODELS = {
-  'claude-3-sonnet': {
+  // Claude 3.5 models
+  'claude-3-5-sonnet': {
     modelId: 'claude-3-5-sonnet-20241022',
-    input: 3.00 / 1000000,   // $3.00 per 1M tokens
-    output: 15.00 / 1000000  // $15.00 per 1M tokens
+    input: 3.00 / 1000000,
+    output: 15.00 / 1000000
+  },
+  'claude-3-5-haiku': {
+    modelId: 'claude-3-5-haiku-20241022',
+    input: 0.80 / 1000000,
+    output: 4.00 / 1000000
+  },
+  // Claude 3 models
+  'claude-3-sonnet': {
+    modelId: 'claude-3-sonnet-20240229',
+    input: 3.00 / 1000000,
+    output: 15.00 / 1000000
   },
   'claude-3-haiku': {
-    modelId: 'claude-3-5-haiku-20241022',
-    input: 0.80 / 1000000,   // $0.80 per 1M tokens
-    output: 4.00 / 1000000   // $4.00 per 1M tokens
+    modelId: 'claude-3-haiku-20240307',
+    input: 0.25 / 1000000,
+    output: 1.25 / 1000000
   }
 };
 
