@@ -2,6 +2,10 @@
 
 This is based on [Kristian Freeman's aiwriter](https://github.com/kristianfreeman/aiwriter) and includes things I've been wanting to have around me.
 
+## What Is This?
+
+It's from my attempt to learn the OpenAI `o1` API, and also the Anthropic APIs. To figure out how to get to a decent set of prompts cost me a total of $10 worth of OpenAI tokens and $7 of Anthropic tokens. In the process I got really excited to learn that `claude-3-haiku` is super cheap and super fast. In general out of loyalty the default model I'm using for summarization is `gpt-4o-mini` but you're free to change it if that's your kinda th ing.
+
 ## Getting Started
 
 1. Install the required dependencies: `npm install`
