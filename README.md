@@ -12,15 +12,16 @@ This is based on [Kristian Freeman's aiwriter](https://github.com/kristianfreema
    Required API keys:
    - `OPENAI_API_KEY` - For GPT models
    - `ANTHROPIC_API_KEY` - For Claude models
+   - `SUMMARY_MODEL` - Default model for summarization tasks (e.g., `gpt-4o-mini` for cost efficiency)
 3. Run the application: `node index.js` or better yet `npm run fstart`
 
 ## Usage
 
 **HTTP Server**: The application runs an HTTP server that listens for GET requests at the `/` endpoint with the following parameters:
 
-- `keyword` (required): The search term or topic to generate content about
-- `model` (optional): The AI model to use for generation (see Models & Pricing below)
-- `source_dir` (optional): Directory name under 'sources' to use for local content ingestion
+- `keyword` (required): The search term or topic to generate content about; for multiple keywords use a + between them
+- `model` (optional): The AI model to use for generation (see Models & Pricing below) as the real brains of this task
+- `source_dir` (optional): Directory name under 'sources' to use for local content ingestion to guide the article
 
 ## Models & Pricing
 
@@ -63,27 +64,33 @@ The API returns a JSON response with the following structure:
 ```
 json
 {
-"keyword": "your-search-term",
-"article": {
-"content": "The generated article in markdown format",
-"usage": {
-"prompt_tokens": 123,
-"completion_tokens": 456,
-"total_tokens": 579
-},
-"cost": {
-"inputCost": 0.000123,
-"outputCost": 0.000456,
-"totalCost": 0.000579
-}
-},
-"usage": {
-"model": "gpt-4o",
-"input_tokens": 1000,
-"output_tokens": 2000,
-"total_tokens": 3000,
-"estimated_cost": 0.00123
-}
+    "keyword": "your-search-term",
+    "article": {
+    "content": "The generated article in markdown format",
+    "usage": {
+        "prompt_tokens": 123,
+        "completion_tokens": 456,
+        "total_tokens": 579
+    },
+    "cost": {
+        "inputCost": 0.000123,
+        "outputCost": 0.000456,
+        "totalCost": 0.000579
+    }
+    },
+    "usage": {
+        "model": "gpt-4o",
+        "input_tokens": 1000,
+        "output_tokens": 2000,
+        "total_tokens": 3000,
+        "estimated_cost": 0.00123
+    },
+    "summary_usage": {
+        "input_tokens": 500,
+        "output_tokens": 800,
+        "total_tokens": 1300,
+        "estimated_cost": 0.00065
+    }
 }
 ```
 
