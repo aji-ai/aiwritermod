@@ -8,7 +8,7 @@ const analyzeSourceRelevance = async (topic, localSources) => {
   logger.info('Starting source analysis...', { 
     topic,
     sourceCount: localSources.length,
-    firstSourcePreview: localSources[0]?.substring(0, 100) // Show start of first source
+    firstSourcePreview: localSources[0]?.substring(0, 100)
   });
   
   const topicTerms = topic.toLowerCase().split(/\s+/);
@@ -32,9 +32,9 @@ Format the output as JSON with these exact keys:
   try {
     logger.info('Sending analysis request to OpenAI...');
     
-    // Await the response from OpenAI
+    const summaryModel = process.env.SUMMARY_MODEL || 'gpt-4o';
     const response = await openaiClient.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: summaryModel,
       messages: [{
         role: 'user',
         content: analysisPrompt
@@ -43,9 +43,7 @@ Format the output as JSON with these exact keys:
       response_format: { type: "json_object" }
     });
 
-    // Log the response after it has been received
-//    logger.info(`Response: ${JSON.stringify(response, null, 2)}`);
-    logger.info(`${response.choices[0].message.content}`);
+    const usage = response.usage;
 
     const analysis = JSON.parse(response.choices[0].message.content);
 
@@ -64,18 +62,16 @@ Format the output as JSON with these exact keys:
       },
       suggestedFocus: topicOverlap
         ? `These sources discuss ${analysis.mainTopics.join(', ')}, which relate to ${topic} through shared ideas in ${analysis.concepts.join(', ')}`
-        : `While these sources focus on ${analysis.mainTopics.join(', ')}, they contain relevant ideas that can inform our understanding of ${topic}`
+        : `While these sources focus on ${analysis.mainTopics.join(', ')}, they contain relevant ideas that can inform our understanding of ${topic}`,
+      usage
     };
 
-    // Log the final analysis result
-    // convert it to back tick
     logger.info('Final analysis result:', {
       isRelevant: result.isRelevant,
       mainTopic: result.sourceThemes.mainTopic,
       conceptCount: result.sourceThemes.concepts.length,
       suggestedFocus: result.suggestedFocus
     });
-    logger.info(`Final analysis result: ${result.isRelevant}\n${result.sourceThemes.mainTopic}\n${result.sourceThemes.concepts}\n${result.suggestedFocus}`);
 
     return result;
 
@@ -100,12 +96,11 @@ Format the output as JSON with these exact keys:
 };
 
 
-const generateArticle = async (topic, summaries, activeModel) => {
-  console.log(`Starting article generation with ${summaries.length} summaries`);
+  const generateArticle = async (topic, summaries, activeModel, totalSummaryInputTokens, totalSummaryOutputTokens) => {
   
   // Use Anthropic handler for Claude models
   if (activeModel.startsWith('claude-')) {
-    return generateArticleWithAnthropic(topic, summaries, activeModel);
+    return generateArticleWithAnthropic(topic, summaries, activeModel, totalSummaryInputTokens, totalSummaryOutputTokens);
   }
   
   // Separate local and web sources
@@ -127,6 +122,12 @@ const generateArticle = async (topic, summaries, activeModel) => {
   if (hasLocalSources) {
     logger.info(`Found ${localSources.length} local sources to analyze`);
     sourceAnalysis = await analyzeSourceRelevance(topic, localSources);
+    if (sourceAnalysis?.usage) {
+      totalSummaryInputTokens += sourceAnalysis.usage.prompt_tokens;
+      totalSummaryOutputTokens += sourceAnalysis.usage.completion_tokens;
+      // report sumary model usage of tokens to do local analysis
+      logger.info(`Summary model usage for source analysis: ${sourceAnalysis.usage.prompt_tokens} input tokens, ${sourceAnalysis.usage.completion_tokens} output tokens`);
+    }
   } else {
     logger.info('No local sources found for analysis');
   }
@@ -357,7 +358,7 @@ OUTPUT FORMAT:
   }
 };
 
-const generateArticleWithAnthropic = async (topic, summaries, activeModel) => {
+const generateArticleWithAnthropic = async (topic, summaries, activeModel, totalSummaryInputTokens, totalSummaryOutputTokens) => {
   const { anthropicClient, getAnthropicModelId } = require('./anthropic');
   const fullModelId = getAnthropicModelId(activeModel);
   logger.info(`Using Anthropic model: ${fullModelId} for article generation`);
@@ -385,14 +386,10 @@ const generateArticleWithAnthropic = async (topic, summaries, activeModel) => {
 
   const sourceAnalysis = hasValidLocalSources ? await analyzeSourceRelevance(topic, localSources) : null;
 
-  // Log source analysis results
-  if (sourceAnalysis) {
-    logger.info('*** Source analysis results:', {
-      isRelevant: sourceAnalysis.isRelevant,
-      mainTopic: sourceAnalysis.sourceThemes.mainTopic,
-      concepts: sourceAnalysis.sourceThemes.concepts,
-      suggestedFocus: sourceAnalysis.suggestedFocus
-    });
+  if (sourceAnalysis?.usage) {
+    totalSummaryInputTokens += sourceAnalysis.usage.prompt_tokens;
+    totalSummaryOutputTokens += sourceAnalysis.usage.completion_tokens;
+    logger.info(`Summary model usage for source analysis: ${sourceAnalysis.usage.prompt_tokens} input tokens, ${sourceAnalysis.usage.completion_tokens} output tokens`);
   }
 
   // Use the same source context and requirements as OpenAI
@@ -478,7 +475,9 @@ Begin by analyzing the sources, then write the article following the process abo
     return {
       content: response.content,
       usage,
-      cost
+      cost,
+      totalSummaryInputTokens,
+      totalSummaryOutputTokens
     };
   } catch (error) {
     logger.error('Error in Anthropic article generation:', error);

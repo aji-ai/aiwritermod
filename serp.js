@@ -31,7 +31,10 @@ const queryGoogle = async (keyword) => {
   return search.results.slice(0, 5);
 };
 
-const summarizeContent = async (url, activeModel) => {
+const summarizeContent = async (url) => {
+  const summaryModel = process.env.SUMMARY_MODEL || 'gpt-4o';
+  logger.info(`SUMMARIZING with ${summaryModel} ...`);
+
   let html;
   try {
     html = await fetch(url);
@@ -45,10 +48,6 @@ const summarizeContent = async (url, activeModel) => {
   const body = $("h1, h2, h3, h4, h5, h6, p");
 
   const content = body.text().slice(0, 14000);
-
-  // Use gpt-4o for summarization when main model is o1-mini
-  const summaryModel = activeModel.startsWith('o1-mini') ? 'gpt-4o' : activeModel;
-  logger.info(`Using ${summaryModel} for summarization (main model: ${activeModel})`);
 
   // Common summary prompt for all models
   const summaryPrompt = `TASK: Create a detailed summary of the provided content.
@@ -143,14 +142,6 @@ ${summaryPrompt}`
     const usage = response.usage;
     const cost = calculateCost(usage.prompt_tokens, usage.completion_tokens, summaryModel);
 
-    logger.info(`Web content summarization tokens used: ${JSON.stringify({
-      prompt_tokens: usage.prompt_tokens,
-      completion_tokens: usage.completion_tokens,
-      total_tokens: usage.total_tokens,
-      model: summaryModel,
-      estimated_cost: cost.totalCost
-    })}`);
-
     return {
       content: response.choices[0].message.content,
       source: url,
@@ -201,13 +192,21 @@ const calculateCost = (inputTokens, outputTokens, model) => {
       input: 3.00 / 1000000,
       output: 12.00 / 1000000
     },
+    'claude-3-5-sonnet': {
+      input: 3.00 / 1000000,
+      output: 15.00 / 1000000
+    },
+    'claude-3-5-haiku': {
+      input: 0.80 / 1000000,
+      output: 4.00 / 1000000
+    },
     'claude-3-sonnet': {
       input: 3.00 / 1000000,
       output: 15.00 / 1000000
     },
     'claude-3-haiku': {
-      input: 0.80 / 1000000,
-      output: 4.00 / 1000000
+      input: 0.25 / 1000000,
+      output: 1.25 / 1000000
     }
   };
 
